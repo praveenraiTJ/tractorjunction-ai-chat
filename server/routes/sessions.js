@@ -5,6 +5,15 @@ const { getCache, setCache, clearSessionData } = require('../services/cacheServi
 
 const router = express.Router();
 
+// Admin endpoints require the ADMIN_TOKEN header; disabled entirely when no token is configured
+router.use('/admin', (req, res, next) => {
+  const token = process.env.ADMIN_TOKEN;
+  if (!token || req.get('x-admin-token') !== token) {
+    return res.status(401).json({ success: false, error: 'Unauthorized' });
+  }
+  next();
+});
+
 // Create new session
 router.post('/', async (req, res) => {
   try {
@@ -187,6 +196,28 @@ router.delete('/:sessionId', async (req, res) => {
   }
 });
 
+// List a user's chat sessions (widget history panel), newest first, titled by the first question
+router.get('/user/:userId', async (req, res) => {
+  try {
+    const sessions = await dbConnection.query(
+      `SELECT cs.session_id, cs.updated_at,
+        (SELECT content FROM chat_messages m WHERE m.session_id = cs.session_id AND m.message_type = 'user'
+         ORDER BY m.id ASC LIMIT 1) AS title,
+        (SELECT MAX(created_at) FROM chat_messages m WHERE m.session_id = cs.session_id) AS last_message_at
+      FROM chat_sessions cs
+      WHERE cs.user_id = ?
+      HAVING title IS NOT NULL
+      ORDER BY last_message_at DESC
+      LIMIT 30`,
+      [req.params.userId]
+    );
+    res.json({ success: true, sessions });
+  } catch (error) {
+    console.error('User sessions error:', error);
+    res.status(500).json({ success: false, error: 'Failed to retrieve sessions' });
+  }
+});
+
 // Get session messages
 router.get('/:sessionId/messages', async (req, res) => {
   try {
@@ -205,8 +236,10 @@ router.get('/:sessionId/messages', async (req, res) => {
       params.push(messageType);
     }
 
-    query += ' ORDER BY created_at ASC LIMIT ? OFFSET ?';
-    params.push(parseInt(limit), parseInt(offset));
+    // LIMIT placeholders fail with mysql2 prepared statements on MySQL 8, so inline validated integers
+    const safeLimit = Math.min(Math.max(parseInt(limit) || 50, 1), 200);
+    const safeOffset = Math.max(parseInt(offset) || 0, 0);
+    query += ` ORDER BY created_at ASC, id ASC LIMIT ${safeLimit} OFFSET ${safeOffset}`;
 
     const messages = await dbConnection.query(query, params);
 
@@ -215,7 +248,8 @@ router.get('/:sessionId/messages', async (req, res) => {
       messages: messages.map(msg => ({
         type: msg.message_type,
         content: msg.content,
-        metadata: msg.metadata ? JSON.parse(msg.metadata) : null,
+        // mysql2 already parses JSON columns
+        metadata: typeof msg.metadata === 'string' ? JSON.parse(msg.metadata) : msg.metadata,
         timestamp: msg.created_at
       })),
       pagination: {
@@ -307,8 +341,7 @@ router.get('/admin/active', async (req, res) => {
       FROM chat_sessions 
       WHERE updated_at >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
       ORDER BY updated_at DESC
-      LIMIT ?`,
-      [parseInt(limit)]
+      LIMIT ${Math.min(Math.max(parseInt(limit) || 100, 1), 500)}`
     );
 
     res.json({

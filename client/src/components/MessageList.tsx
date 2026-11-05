@@ -105,8 +105,8 @@ const MessageList: React.FC<MessageListProps> = ({ messages }) => {
                 color: message.type === 'user' ? 'white' : 'text.primary',
                 position: 'relative',
                 border: message.type === 'bot' ? '1px solid #e0e0e0' : 'none',
-                boxShadow: message.type === 'user' 
-                  ? '0 2px 8px rgba(25, 118, 210, 0.2)' 
+                boxShadow: message.type === 'user'
+                  ? '0 2px 8px rgba(25, 118, 210, 0.2)'
                   : '0 1px 3px rgba(0, 0, 0, 0.1)',
               }}
             >
@@ -121,7 +121,7 @@ const MessageList: React.FC<MessageListProps> = ({ messages }) => {
                   <Grid container spacing={2}>
                     {message.tractors.slice(0, 3).map((tractor) => (
                       <Grid item xs={12} sm={6} md={4} key={tractor.id}>
-                        <TractorCard 
+                        <TractorCard
                           tractor={tractor}
                           onViewDetails={(tractor) => {
                             console.log('Tractor details requested:', tractor);

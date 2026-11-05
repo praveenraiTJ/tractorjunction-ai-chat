@@ -8,21 +8,28 @@ interface TractorCardProps {
 }
 
 const TractorCard: React.FC<TractorCardProps> = ({ tractor, onViewDetails }) => {
-  const formatPrice = (price: string) => {
-    if (!price || price === '0' || price === '') return 'Contact for price';
-    
+  const formatPrice = (price: any) => {
+    if (price === null || price === undefined || price === '0' || price === 0 || price === '') {
+      return 'Contact for price';
+    }
+
+    const priceStr = String(price);
+
     // Handle price ranges like "5.16-5.32"
-    if (price.includes('-')) {
-      const [min, max] = price.split('-');
+    if (priceStr.includes('-')) {
+      const [min, max] = priceStr.split('-');
       const minPrice = parseFloat(min);
       const maxPrice = parseFloat(max);
       if (!isNaN(minPrice) && !isNaN(maxPrice)) {
         return `₹ ${minPrice} - ${maxPrice} Lakh*`;
       }
     }
-    
-    const numPrice = parseFloat(price);
+
+    const numPrice = parseFloat(priceStr);
     if (isNaN(numPrice)) return 'Contact for price';
+
+    // If it's a very large number (like from the DB directly), it might need formatting
+    // But usually it's in Lakhs as per the UI
     return `₹ ${numPrice} Lakh*`;
   };
 
@@ -37,7 +44,7 @@ const TractorCard: React.FC<TractorCardProps> = ({ tractor, onViewDetails }) => 
     if (!firstImage) {
       return 'https://assets.tractorjunction.com/tractor-junction/assets/images/upload/di-60-1631527166.webp?width=347&height=202';
     }
-    
+
     // If it's a full URL, return as is, otherwise construct the path
     if (firstImage.startsWith('http')) {
       return firstImage;
@@ -60,8 +67,8 @@ const TractorCard: React.FC<TractorCardProps> = ({ tractor, onViewDetails }) => 
   return (
     <div className="tractor-card">
       <div className="tractor-card-image">
-        <img 
-          src={getImageUrl(tractor.images, tractor.image)} 
+        <img
+          src={getImageUrl(tractor.images, tractor.image)}
           alt={`${tractor.brand_name || 'Unknown'} ${tractor.model_name}`}
           onError={(e) => {
             const target = e.target as HTMLImageElement;
@@ -69,30 +76,30 @@ const TractorCard: React.FC<TractorCardProps> = ({ tractor, onViewDetails }) => 
           }}
         />
       </div>
-      
+
       <div className="tractor-card-content">
         <div className="tractor-card-title">
-          <a 
-            href={getProductUrl()} 
-            target="_blank" 
+          <a
+            href={getProductUrl()}
+            target="_blank"
             rel="noopener noreferrer"
             className="tractor-card-title-link"
           >
             {tractor.brand_name || 'Unknown'} {tractor.model_name}
           </a>
         </div>
-        
+
         <div className="tractor-card-price">
           {formatPrice(tractor.price)}
         </div>
-        
+
         <div className="tractor-card-emi">
           <span className="emi-text">For EMI </span>
           <a href={getProductUrl()} target="_blank" rel="noopener noreferrer" className="emi-link">Click Here</a>
         </div>
-        
+
         <div className="tractor-card-actions">
-          <button 
+          <button
             className="btn btn-primary"
             onClick={handleViewDetails}
           >

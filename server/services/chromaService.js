@@ -9,6 +9,8 @@ class ChromaService {
   }
 
   async initialize() {
+    // dbConnection is initialized by server/index.js before this runs (needed for fallback)
+
     // Check if ChromaDB is disabled via environment variable
     if (process.env.DISABLE_CHROMADB === 'true') {
       console.log('ℹ️ ChromaDB disabled via environment variable, using fallback database search');
@@ -25,7 +27,7 @@ class ChromaService {
       // Test connection with timeout
       await Promise.race([
         this.client.heartbeat(),
-        new Promise((_, reject) => 
+        new Promise((_, reject) =>
           setTimeout(() => reject(new Error('ChromaDB connection timeout')), 5000)
         )
       ]);
@@ -33,15 +35,13 @@ class ChromaService {
 
       // Create or get collection
       await this.initializeCollection();
-      
+
       // Populate collection with tractor data if empty
       await this.populateCollection();
-      
+
       console.log('✅ ChromaDB service initialized');
     } catch (error) {
       console.log('⚠️ ChromaDB not available, using fallback database search');
-      console.log('   This is normal if ChromaDB server is not running');
-      console.log('   To disable ChromaDB permanently, set DISABLE_CHROMADB=true in .env');
       // Continue without ChromaDB if it fails
       this.client = null;
     }
@@ -49,23 +49,15 @@ class ChromaService {
 
   async initializeCollection() {
     try {
-      // Check if collection exists
-      const collections = await this.client.listCollections();
-      const existingCollection = collections.find(col => col.name === this.collectionName);
-
-      if (existingCollection) {
-        this.collection = await this.client.getCollection({ name: this.collectionName });
-        console.log('✅ Using existing ChromaDB collection');
-      } else {
-        this.collection = await this.client.createCollection({
-          name: this.collectionName,
-          metadata: {
-            description: 'Tractor knowledge base for semantic search',
-            created_at: new Date().toISOString()
-          }
-        });
-        console.log('✅ Created new ChromaDB collection');
-      }
+      // Use getOrCreateCollection to handle both new and existing collections
+      this.collection = await this.client.getOrCreateCollection({
+        name: this.collectionName,
+        metadata: {
+          description: 'Tractor knowledge base for semantic search',
+          created_at: new Date().toISOString()
+        }
+      });
+      console.log('✅ ChromaDB collection ready');
     } catch (error) {
       console.error('Failed to initialize ChromaDB collection:', error);
       throw error;
@@ -85,22 +77,27 @@ class ChromaService {
 
       console.log('📚 Populating ChromaDB collection with tractor data...');
 
-      // Get all tractors from database
+      // Get all tractors from database - using correct column names
       const tractors = await dbConnection.query(`
         SELECT 
-          tractor_id,
-          brand,
-          model,
-          price,
-          engine_power,
-          fuel_type,
-          transmission,
-          category,
-          description,
-          specifications,
-          features
-        FROM tractors_trans 
-        WHERE status = 'active'
+          tt.id,
+          tt.tractors_id,
+          tt.model_name,
+          tt.brand_id,
+          tt.hp,
+          tt.fuel_pump,
+          tt.transmission_type,
+          tt.wheel_drive,
+          tt.price,
+          tt.min_price,
+          tt.max_price,
+          tt.overview,
+          tt.applications,
+          tt.additional_features,
+          bt.name as brand_name
+        FROM tractors_trans tt
+        LEFT JOIN brands_trans bt ON CAST(tt.brand_id AS UNSIGNED) = bt.brand_id AND bt.lang = 'en'
+        WHERE tt.status = 'launched' AND tt.lang = 'en' AND tt.isActive = 1
         LIMIT 1000
       `);
 
@@ -117,19 +114,19 @@ class ChromaService {
       for (const tractor of tractors) {
         // Create searchable text content
         const content = this.createSearchableContent(tractor);
-        
+
         documents.push(content);
         metadatas.push({
-          tractor_id: tractor.tractor_id,
-          brand: tractor.brand,
-          model: tractor.model,
-          category: tractor.category,
-          price: tractor.price,
-          engine_power: tractor.engine_power,
-          fuel_type: tractor.fuel_type,
-          transmission: tractor.transmission
+          tractor_id: tractor.tractors_id,
+          brand: tractor.brand_name || 'Unknown',
+          model: tractor.model_name,
+          category: tractor.applications || 'General',
+          price: tractor.min_price || 0,
+          engine_power: tractor.hp || 'N/A',
+          fuel_type: tractor.fuel_pump || 'N/A',
+          transmission: tractor.transmission_type || 'N/A'
         });
-        ids.push(`tractor_${tractor.tractor_id}`);
+        ids.push(`tractor_${tractor.tractors_id}`);
       }
 
       // Add documents to collection in batches
@@ -139,13 +136,20 @@ class ChromaService {
         const batchMetadatas = metadatas.slice(i, i + batchSize);
         const batchIds = ids.slice(i, i + batchSize);
 
-        await this.collection.add({
+        const payload = {
           documents: batch,
-          metadatas: batchMetadatas,
+          metadatas: batchMetadatas.map(m => this._sanitizeMetadata(m)),
           ids: batchIds
-        });
+        };
+        try {
+          await this.collection.add(payload);
+        } catch (error) {
+          // Embedding runs client-side and can outlast the server's keep-alive,
+          // leaving a stale socket (ECONNRESET). Retry once on a fresh connection.
+          if (error.name !== 'ChromaConnectionError') throw error;
+          await this.collection.add(payload);
+        }
 
-        console.log(`📚 Added batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(documents.length / batchSize)}`);
       }
 
       console.log(`✅ Populated ChromaDB with ${documents.length} tractor documents`);
@@ -156,48 +160,48 @@ class ChromaService {
 
   createSearchableContent(tractor) {
     const parts = [
-      `Brand: ${tractor.brand}`,
-      `Model: ${tractor.model}`,
-      `Category: ${tractor.category}`,
-      `Engine Power: ${tractor.engine_power}`,
-      `Fuel Type: ${tractor.fuel_type}`,
-      `Transmission: ${tractor.transmission}`,
-      `Price: ₹${tractor.price?.toLocaleString() || 'Contact for price'}`
+      `Brand: ${tractor.brand_name || 'Unknown'}`,
+      `Model: ${tractor.model_name}`,
+      `Category: ${tractor.applications || 'General'}`,
+      `Engine Power: ${tractor.hp} HP`,
+      `Fuel Type: ${tractor.fuel_pump || 'N/A'}`,
+      `Transmission: ${tractor.transmission_type || 'N/A'}`,
+      `Price: ₹${tractor.min_price?.toLocaleString() || 'Contact for price'}`
     ];
 
-    if (tractor.description) {
-      parts.push(`Description: ${tractor.description}`);
+    if (tractor.overview) {
+      parts.push(`Description: ${tractor.overview}`);
     }
 
-    if (tractor.specifications) {
-      try {
-        const specs = typeof tractor.specifications === 'string' 
-          ? JSON.parse(tractor.specifications) 
-          : tractor.specifications;
-        
-        Object.entries(specs).forEach(([key, value]) => {
-          parts.push(`${key}: ${value}`);
-        });
-      } catch (error) {
-        console.error('Error parsing specifications:', error);
-      }
-    }
-
-    if (tractor.features) {
-      try {
-        const features = typeof tractor.features === 'string' 
-          ? JSON.parse(tractor.features) 
-          : tractor.features;
-        
-        if (Array.isArray(features)) {
-          parts.push(`Features: ${features.join(', ')}`);
-        }
-      } catch (error) {
-        console.error('Error parsing features:', error);
-      }
+    if (tractor.additional_features) {
+      parts.push(`Features: ${tractor.additional_features}`);
     }
 
     return parts.join('\n');
+  }
+
+  /**
+   * Sanitizes metadata to ensure only strings, numbers, and booleans are passed to ChromaDB.
+   * ChromaDB does not support nested objects or arrays in metadata.
+   */
+  _sanitizeMetadata(metadata) {
+    if (!metadata || typeof metadata !== 'object') return {};
+
+    const sanitized = {};
+    for (const [key, value] of Object.entries(metadata)) {
+      if (value === null || value === undefined) {
+        continue;
+      }
+
+      const type = typeof value;
+      if (type === 'string' || type === 'number' || type === 'boolean') {
+        sanitized[key] = value;
+      } else {
+        // Stringify complex types (objects, arrays)
+        sanitized[key] = JSON.stringify(value);
+      }
+    }
+    return sanitized;
   }
 
   async searchSimilar(query, limit = 5, filters = {}) {
@@ -207,12 +211,7 @@ class ChromaService {
         return await this.fallbackSearch(query, limit, filters);
       }
 
-      console.log('='.repeat(60));
-      console.log(`🔍 CHROMADB: SEARCHING SIMILAR DOCUMENTS`);
-      console.log('='.repeat(60));
-      console.log('   Query:', query);
-      console.log('   Limit:', limit);
-      console.log('   Filters:', JSON.stringify(filters, null, 2));
+      console.log(`🔍 ChromaDB: Searching similar documents for: "${query}" (limit: ${limit})`);
 
       // Build where clause for filtering
       const whereClause = {};
@@ -224,7 +223,6 @@ class ChromaService {
         if (filters.maxPrice) whereClause.price.$lte = filters.maxPrice;
       }
 
-      console.log('   Where clause:', JSON.stringify(whereClause, null, 2));
 
       const results = await this.collection.query({
         queryTexts: [query],
@@ -232,11 +230,6 @@ class ChromaService {
         where: Object.keys(whereClause).length > 0 ? whereClause : undefined
       });
 
-      console.log('   Raw results:', {
-        documents_count: results.documents[0]?.length || 0,
-        metadatas_count: results.metadatas[0]?.length || 0,
-        distances_count: results.distances[0]?.length || 0
-      });
 
       // Format results
       const formattedResults = results.documents[0].map((doc, index) => ({
@@ -252,15 +245,7 @@ class ChromaService {
         content: doc
       }));
 
-      console.log('─'.repeat(40));
-      console.log(`✅ CHROMADB: FOUND ${formattedResults.length} SIMILAR DOCUMENTS`);
-      console.log('─'.repeat(40));
-      if (formattedResults.length > 0) {
-        console.log('   Top result similarity score:', formattedResults[0].similarity_score);
-        console.log('   Top result brand:', formattedResults[0].brand);
-        console.log('   Top result model:', formattedResults[0].model);
-      }
-      console.log('='.repeat(60));
+      console.log(`✅ ChromaDB: Found ${formattedResults.length} similar documents` + (formattedResults.length > 0 ? ` (Top match: ${formattedResults[0].brand} ${formattedResults[0].model}, score: ${formattedResults[0].similarity_score.toFixed(4)})` : ''));
       return formattedResults;
     } catch (error) {
       console.error('ChromaDB search error:', error);
@@ -271,18 +256,16 @@ class ChromaService {
 
   async fallbackSearch(query, limit = 5, filters = {}) {
     try {
-      console.log('🔄 Using fallback database search');
-      console.log('   Query:', query);
-      console.log('   Filters:', JSON.stringify(filters, null, 2));
-      
+      console.log(`🔄 Fallback: Using database search for: "${query}"`);
+
       // Check database connection first
       const dbConnected = await this.checkDatabaseConnection();
-      
+
       if (!dbConnected) {
         console.log('⚠️ Database not available, returning empty results');
         return [];
       }
-      
+
       const searchParams = {
         query: query,
         brand: filters.brand,
@@ -293,7 +276,7 @@ class ChromaService {
       };
 
       const results = await dbConnection.searchTractors(searchParams);
-      
+
       console.log(`✅ Fallback search found ${results.length} results`);
       return results;
     } catch (error) {
@@ -319,10 +302,7 @@ class ChromaService {
         return false;
       }
 
-      console.log('📝 ChromaDB: Adding tractor to collection...');
-      console.log('   Tractor ID:', tractorData.tractor_id);
-      console.log('   Brand:', tractorData.brand);
-      console.log('   Model:', tractorData.model);
+      console.log(`📝 ChromaDB: Adding tractor: ${tractorData.brand} ${tractorData.model} (ID: ${tractorData.tractor_id})`);
 
       const content = this.createSearchableContent(tractorData);
       const metadata = {
@@ -336,12 +316,10 @@ class ChromaService {
         transmission: tractorData.transmission
       };
 
-      console.log('   Content length:', content.length, 'characters');
-      console.log('   Metadata:', JSON.stringify(metadata, null, 2));
 
       await this.collection.add({
         documents: [content],
-        metadatas: [metadata],
+        metadatas: [this._sanitizeMetadata(metadata)],
         ids: [`tractor_${tractorData.tractor_id}`]
       });
 
@@ -375,15 +353,7 @@ class ChromaService {
         return false;
       }
 
-      console.log('='.repeat(60));
-      console.log('📝 CHROMADB: ADDING QUERY RESPONSE DOCUMENT');
-      console.log('='.repeat(60));
-      console.log('   Query:', documentData.query);
-      console.log('   Response length:', documentData.text?.length || 0, 'characters');
-      console.log('   Language:', documentData.language);
-      console.log('   Model:', documentData.model);
-      console.log('   Has Tractors:', documentData.hasTractors);
-      console.log('   Tractors count:', documentData.tractors?.length || 0);
+      console.log(`📝 ChromaDB: Adding response document for: "${documentData.query.substring(0, 50)}..."`);
 
       const content = `${documentData.query}\n\n${documentData.text}`;
       const metadata = {
@@ -399,24 +369,16 @@ class ChromaService {
         timestamp: documentData.timestamp || new Date().toISOString()
       };
 
-      console.log('   Content length:', content.length, 'characters');
-      console.log('   Metadata keys:', Object.keys(metadata));
-      console.log('   Usage tokens:', metadata.usage_tokens);
 
       const documentId = `query_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
+
       await this.collection.add({
         documents: [content],
-        metadatas: [metadata],
+        metadatas: [this._sanitizeMetadata(metadata)],
         ids: [documentId]
       });
 
-      console.log('─'.repeat(40));
-      console.log(`✅ CHROMADB: SUCCESSFULLY ADDED DOCUMENT`);
-      console.log('─'.repeat(40));
-      console.log('   Document ID:', documentId);
-      console.log('   Collection:', this.collectionName);
-      console.log('='.repeat(60));
+      console.log(`✅ ChromaDB: Successfully added response document (ID: ${documentId})`);
       return true;
     } catch (error) {
       console.error('❌ ChromaDB: Failed to add document:', error.message);

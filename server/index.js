@@ -5,6 +5,7 @@ const morgan = require('morgan');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const { createServer } = require('http');
+const path = require('path');
 const { Server } = require('socket.io');
 require('dotenv').config();
 
@@ -13,6 +14,7 @@ const dbConnection = require('./config/database');
 const { socketService, setupSocketHandlers } = require('./services/socketService');
 const { initializeCache } = require('./services/cacheService');
 const { initializeChromaDB } = require('./services/chromaService');
+const { warmMandiCache } = require('./services/agent/tools/mandi');
 
 // Import routes
 const chatRoutes = require('./routes/chat');
@@ -22,15 +24,22 @@ const tractorRoutes = require('./routes/tractors');
 
 const app = express();
 
+// Browser origins allowed to call the API/socket. In production the widget iframe is served by this
+// server itself (e.g. https://ai.tractorjunction.com), so its origin must be set in WIDGET_ORIGIN.
+const allowedOrigins = process.env.NODE_ENV === 'production'
+  ? ['https://www.tractorjunction.com', 'https://tractorjunction.com', process.env.WIDGET_ORIGIN].filter(Boolean)
+  : ['http://localhost:3000', 'http://127.0.0.1:3000', 'http://localhost:5000'];
+
+// Sites allowed to embed the widget iframe
+const frameAncestors = (process.env.WIDGET_FRAME_ANCESTORS || 'https://*.tractorjunction.com https://tractorjunction.com https://*.tractorfirst.com').split(/s+/);
+
 // Trust proxy for rate limiting
 app.set('trust proxy', 1);
 
 const server = createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: process.env.NODE_ENV === 'production' 
-      ? ['https://www.tractorjunction.com', 'https://tractorjunction.com']
-      : ['http://localhost:3000', 'http://127.0.0.1:3000'],
+    origin: allowedOrigins,
     methods: ['GET', 'POST'],
     credentials: true
   }
@@ -47,16 +56,19 @@ app.use(helmet({
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       scriptSrc: ["'self'"],
       imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", "https://api.openai.com"]
+      connectSrc: ["'self'", "https://api.openai.com"],
+      frameAncestors: ["'self'", ...frameAncestors]
     }
-  }
+  },
+  // Embedding is governed by CSP frame-ancestors; X-Frame-Options would block the TJ site
+  frameguard: false,
+  // widget.js is loaded by <script> tags on other origins
+  crossOriginResourcePolicy: { policy: 'cross-origin' }
 }));
 
 // CORS configuration
 app.use(cors({
-  origin: process.env.NODE_ENV === 'production' 
-    ? ['https://www.tractorjunction.com', 'https://tractorjunction.com']
-    : ['http://localhost:3000', 'http://127.0.0.1:3000'],
+  origin: allowedOrigins,
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
@@ -105,6 +117,18 @@ app.use('/api/tractors', tractorRoutes);
 
 // Socket.IO connection handling
 setupSocketHandlers(io);
+
+// Production: serve the React build (widget at /widget, loader at /widget.js)
+if (process.env.NODE_ENV === 'production') {
+  const buildDir = path.join(__dirname, '..', 'client', 'build');
+  app.use(express.static(buildDir, { index: false }));
+  app.get(['/', '/widget'], (req, res) => res.sendFile(path.join(buildDir, 'index.html')));
+} else {
+  // Dev: embed test page (parent on :5000, widget iframe on :3000 = real cross-origin setup)
+  // The test page stands in for the TJ site, which has its own CSP, so drop ours here
+  app.use('/test', (req, res, next) => { res.removeHeader('Content-Security-Policy'); next(); },
+    express.static(path.join(__dirname, '..', 'test')));
+}
 
 // Error handling middleware
 app.use((err, req, res, next) => {
@@ -163,6 +187,10 @@ async function startServer() {
       console.log('   To enable ChromaDB, start the ChromaDB server: docker run -p 8000:8000 chromadb/chroma');
     }
     
+    // Prefetch today's mandi prices (non-blocking), refreshed when the 6h cache expires
+    warmMandiCache();
+    setInterval(warmMandiCache, 6 * 60 * 60 * 1000 + 60000);
+
     // Start server
     server.listen(PORT, () => {
       console.log(`🎯 Server running on port ${PORT}`);

@@ -12,27 +12,37 @@
     "install-all": "npm install && cd client && npm install"
   },
   "dependencies": {
-    "express": "^4.18.2",
+    "astronomy-engine": "^2.1.19",
+    "chromadb": "^1.7.3",
+    "chromadb-default-embed": "^2.14.0",
+    "compression": "^1.7.4",
     "cors": "^2.8.5",
     "dotenv": "^16.3.1",
-    "mysql2": "^3.6.5",
-    "openai": "^4.20.1",
-    "socket.io": "^4.7.4",
-    "chromadb": "^1.7.3",
-    "node-cache": "^5.1.2",
+    "express": "^4.18.2",
     "express-rate-limit": "^7.1.5",
     "helmet": "^7.1.0",
-    "morgan": "^1.10.0",
-    "compression": "^1.7.4",
-    "uuid": "^9.0.1",
+    "joi": "^17.11.0",
     "moment": "^2.29.4",
-    "joi": "^17.11.0"
+    "morgan": "^1.10.0",
+    "mysql2": "^3.6.5",
+    "node-cache": "^5.1.2",
+    "openai": "^4.20.1",
+    "socket.io": "^4.7.4",
+    "uuid": "^9.0.1"
   },
   "devDependencies": {
-    "nodemon": "^3.0.2",
-    "concurrently": "^8.2.2"
+    "baseline-browser-mapping": "^2.9.14",
+    "concurrently": "^8.2.2",
+    "nodemon": "^3.0.2"
   },
-  "keywords": ["ai", "chat", "tractor", "openai", "mysql", "chromadb"],
+  "keywords": [
+    "ai",
+    "chat",
+    "tractor",
+    "openai",
+    "mysql",
+    "chromadb"
+  ],
   "author": "Tractor Junction",
   "license": "MIT"
 }

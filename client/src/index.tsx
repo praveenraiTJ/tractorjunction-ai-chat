@@ -1,15 +1,21 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import ReactDOM from 'react-dom/client';
-import './index.css';
-import App from './App';
 import reportWebVitals from './reportWebVitals';
+
+// /widget is the embeddable chat (iframe on tractorjunction.com); everything else is the full-page app.
+// Separate lazy chunks keep the widget free of the full app's global CSS (imported by App) and code.
+const isWidget = window.location.pathname.startsWith('/widget');
+const App = React.lazy(() => import('./App'));
+const WidgetApp = React.lazy(() => import('./widget/WidgetApp'));
 
 const root = ReactDOM.createRoot(
   document.getElementById('root') as HTMLElement
 );
 root.render(
   <React.StrictMode>
-    <App />
+    <Suspense fallback={null}>
+      {isWidget ? <WidgetApp /> : <App />}
+    </Suspense>
   </React.StrictMode>
 );
 

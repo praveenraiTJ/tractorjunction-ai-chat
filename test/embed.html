@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="hi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta property="og:title" content="Mahindra 575 DI Tractor Price, Specification & Features">
+  <title>Embed test — Mahindra 575 DI | Tractor Junction (dummy page)</title>
+  <!-- Deliberately aggressive host-page CSS: the widget must look the same despite it -->
+  <style>
+    * { font-family: "Times New Roman", serif !important; }
+    body { margin: 0; background: #fff; color: #333; }
+    button { background: red !important; border-radius: 0 !important; }
+    iframe { border: 5px dashed blue; }
+    div { line-height: 2; }
+    header { background: #fff; color: #cd454e; padding: 16px 24px; font-size: 22px; border-bottom: 3px solid #d84f57; }
+    main { max-width: 900px; margin: 24px auto; padding: 0 16px; }
+    .spec { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .spec div { background: #F2F2F2; padding: 8px; }
+    /* Stand-ins for TJ's fixed mobile UI (components/mobile-bottom-navigation, footer .scroll-to-top) */
+    .mobile-bottom-navigation { display: none; position: fixed; left: 0; right: 0; bottom: 0; height: 60px; background: #fff;
+      box-shadow: 0 -1px 4px rgba(0,0,0,.12); z-index: 500; justify-content: space-around; align-items: center; font-size: 12px; }
+    .scroll-to-top { display: none; position: fixed; right: 25px; bottom: 65px; width: 35px; height: 35px; border-radius: 50%;
+      background: #0d3b66; color: #fff; text-align: center; line-height: 35px; z-index: 9; }
+    @media (max-width: 575px) { .mobile-bottom-navigation { display: flex; } .scroll-to-top { display: block; } }
+  </style>
+</head>
+<body>
+  <header>TractorJunction (dummy host page for widget testing)</header>
+  <main>
+    <h1>Mahindra 575 DI</h1>
+    <p>This page is served from <b>localhost:5000</b>; the widget iframe loads from <b>localhost:3000</b> — a real cross-origin embed.</p>
+    <div class="spec">
+      <div>HP: 45</div><div>Price: ₹6.84-7.21 Lakh</div>
+      <div>Cylinder: 4</div><div>Lifting: 1500 kg</div>
+    </div>
+    <p style="height:1500px">Scroll filler…</p>
+  </main>
+  <nav class="mobile-bottom-navigation"><span>Home</span><span>New</span><span>Used</span><span>Sell</span><span>More</span></nav>
+  <span class="scroll-to-top">↑</span>
+
+  <!-- Same tag the TJ partial (resources/views/components/ai-chat-widget.blade.php) renders on a tractor page -->
+  <script src="http://localhost:3000/widget.js" async
+    data-lang="hi"
+    data-position="right"
+    data-bottom="24"
+    data-position-mobile="left"
+    data-bottom-mobile="84"
+    data-page-type="singleTractor_page"
+    data-brand="Mahindra"
+    data-model="575 DI"
+    data-tractor-id="100"></script>
+</body>
+</html>

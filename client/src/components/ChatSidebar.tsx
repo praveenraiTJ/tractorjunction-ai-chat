@@ -94,7 +94,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
         ...session,
         isActive: false,
       }));
-      
+
       return [newSession, ...updatedSessions];
     });
   };
@@ -114,8 +114,8 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
 
           // Update title if it's the first user message
           if (isUser && session.title === 'New Chat') {
-            updatedSession.title = message.length > 30 
-              ? message.substring(0, 30) + '...' 
+            updatedSession.title = message.length > 30
+              ? message.substring(0, 30) + '...'
               : message;
           }
 
@@ -337,26 +337,26 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({
             )}
           </Box>
 
-        {/* Footer */}
-        <Box sx={{ p: 2, borderTop: '1px solid #e0e0e0' }}>
-          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
-            <Box
-              component="img"
-              src="https://static-asset.tractorjunction.com/tj/TJ_LOGO_en.svg"
-              alt="Tractor Junction"
-              sx={{
-                height: 20,
-                width: 'auto',
-              }}
-            />
+          {/* Footer */}
+          <Box sx={{ p: 2, borderTop: '1px solid #e0e0e0' }}>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 1 }}>
+              <Box
+                component="img"
+                src="https://static-asset.tractorjunction.com/tj/TJ_LOGO_en.svg"
+                alt="Tractor Junction"
+                sx={{
+                  height: 20,
+                  width: 'auto',
+                }}
+              />
+            </Box>
+            <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', display: 'block' }}>
+              Tractor Junction AI Assistant
+            </Typography>
+            <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', display: 'block' }}>
+              {sessions.length} conversation{sessions.length !== 1 ? 's' : ''}
+            </Typography>
           </Box>
-          <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', display: 'block' }}>
-            Tractor Junction AI Assistant
-          </Typography>
-          <Typography variant="caption" color="text.secondary" sx={{ textAlign: 'center', display: 'block' }}>
-            {sessions.length} conversation{sessions.length !== 1 ? 's' : ''}
-          </Typography>
-        </Box>
         </Box>
       </Drawer>
     </>

@@ -23,7 +23,7 @@ import TypingIndicator from './TypingIndicator';
 import ChatSidebar from './ChatSidebar';
 import { Message } from '../types';
 
-interface ChatInterfaceProps {}
+interface ChatInterfaceProps { }
 
 const ChatInterface: React.FC<ChatInterfaceProps> = () => {
   const [messages, setMessages] = useState<Message[]>([]);
@@ -45,7 +45,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = () => {
     if (socket && !sessionId) {
       const newSessionId = `session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
       setSessionId(newSessionId);
-      
+
       socket.emit('initialize_session', {
         sessionId: newSessionId,
         language: language,
@@ -59,12 +59,12 @@ const ChatInterface: React.FC<ChatInterfaceProps> = () => {
       const sessionMessages = chatSessions.get(sessionId);
       if (sessionMessages && Array.isArray(sessionMessages)) {
         // Filter out any malformed messages
-        const validMessages = sessionMessages.filter(msg => 
-          msg && 
-          typeof msg === 'object' && 
-          msg.id && 
-          msg.type && 
-          msg.content !== undefined && 
+        const validMessages = sessionMessages.filter(msg =>
+          msg &&
+          typeof msg === 'object' &&
+          msg.id &&
+          msg.type &&
+          msg.content !== undefined &&
           msg.timestamp
         );
         setMessages(validMessages);
@@ -91,7 +91,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = () => {
     setSessionId(newSessionId);
     setMessages([]);
     setError(null);
-    
+
     if (socket) {
       socket.emit('initialize_session', {
         sessionId: newSessionId,
@@ -104,7 +104,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = () => {
   const handleSessionChange = (newSessionId: string) => {
     setSessionId(newSessionId);
     setError(null);
-    
+
     if (socket) {
       socket.emit('initialize_session', {
         sessionId: newSessionId,
@@ -138,7 +138,7 @@ const ChatInterface: React.FC<ChatInterfaceProps> = () => {
         hasTractors: data.hasTractors || false,
         searchIntent: data.searchIntent || 'general',
       };
-      
+
       setMessages(prev => {
         const updatedMessages = [...prev, newMessage];
         if (sessionId) {
@@ -224,12 +224,6 @@ const ChatInterface: React.FC<ChatInterfaceProps> = () => {
       message: inputValue.trim(),
       messageId: userMessage.id,
     });
-
-    // Also trigger tractor search
-    socket.emit('search_tractors', {
-      query: inputValue.trim(),
-      filters: {},
-    });
   };
 
   const handleKeyPress = (event: React.KeyboardEvent) => {
@@ -272,10 +266,10 @@ const ChatInterface: React.FC<ChatInterfaceProps> = () => {
       />
 
       {/* Main Chat Area */}
-      <Box sx={{ 
-        flex: 1, 
-        display: 'flex', 
-        flexDirection: 'column', 
+      <Box sx={{
+        flex: 1,
+        display: 'flex',
+        flexDirection: 'column',
         height: '100%',
         marginLeft: isSidebarOpen ? '280px' : '0px',
         transition: 'margin-left 0.3s ease',
@@ -374,137 +368,137 @@ const ChatInterface: React.FC<ChatInterfaceProps> = () => {
               },
             }}
           >
-          {error && (
-            <Fade in={!!error}>
-              <Alert
-                severity="error"
-                onClose={() => setError(null)}
-                sx={{ mb: 2 }}
+            {error && (
+              <Fade in={!!error}>
+                <Alert
+                  severity="error"
+                  onClose={() => setError(null)}
+                  sx={{ mb: 2 }}
+                >
+                  {error}
+                </Alert>
+              </Fade>
+            )}
+
+            {messages.length === 0 && !isLoading && (
+              <Box
+                sx={{
+                  flex: 1,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  textAlign: 'center',
+                  p: 4,
+                }}
               >
-                {error}
-              </Alert>
-            </Fade>
-          )}
-
-          {messages.length === 0 && !isLoading && (
-            <Box
-              sx={{
-                flex: 1,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                textAlign: 'center',
-                p: 4,
-              }}
-            >
-              <Typography variant="h6" color="text.secondary" gutterBottom>
-                Welcome to Tractor Junction AI Chat
-              </Typography>
-              <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
-                Ask me anything about tractors! I can help you find the perfect tractor,
-                compare models, check prices, and more.
-              </Typography>
-              <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, justifyContent: 'center' }}>
-                {[
-                  'Show me Mahindra tractors',
-                  'What is the price of John Deere 5050D?',
-                  'Best tractor for farming',
-                  'Compare tractors under 5 lakh',
-                ].map((suggestion) => (
-                  <Chip
-                    key={suggestion}
-                    label={suggestion}
-                    onClick={() => setInputValue(suggestion)}
-                    variant="outlined"
-                    size="small"
-                    sx={{ cursor: 'pointer' }}
-                  />
-                ))}
+                <Typography variant="h6" color="text.secondary" gutterBottom>
+                  Welcome to Tractor Junction AI Chat
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 3 }}>
+                  Ask me anything about tractors! I can help you find the perfect tractor,
+                  compare models, check prices, and more.
+                </Typography>
+                <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, justifyContent: 'center' }}>
+                  {[
+                    'Show me Mahindra tractors',
+                    'What is the price of John Deere 5050D?',
+                    'Best tractor for farming',
+                    'Compare tractors under 5 lakh',
+                  ].map((suggestion) => (
+                    <Chip
+                      key={suggestion}
+                      label={suggestion}
+                      onClick={() => setInputValue(suggestion)}
+                      variant="outlined"
+                      size="small"
+                      sx={{ cursor: 'pointer' }}
+                    />
+                  ))}
+                </Box>
               </Box>
-            </Box>
-          )}
+            )}
 
-          <MessageList messages={messages} />
+            <MessageList messages={messages} />
 
-          {isTyping && <TypingIndicator />}
+            {isTyping && <TypingIndicator />}
 
-          <div ref={messagesEndRef} />
-        </Box>
+            <div ref={messagesEndRef} />
+          </Box>
 
-        {/* Input area - Fixed at bottom */}
-        <Box
-          sx={{
-            p: 3,
-            borderTop: '1px solid #e0e0e0',
-            backgroundColor: '#ffffff',
-            boxShadow: '0 -1px 3px rgba(0, 0, 0, 0.1)',
-            flexShrink: 0,
-            position: 'sticky',
-            bottom: 0,
-            zIndex: 1000,
-          }}
-        >
-          <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
-            <TextField
-              ref={inputRef}
-              fullWidth
-              multiline
-              maxRows={4}
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyPress={handleKeyPress}
-              placeholder="Ask me anything about tractors..."
-              disabled={!isConnected || isLoading}
-              variant="outlined"
-              size="small"
-              sx={{
-                '& .MuiOutlinedInput-root': {
-                  borderRadius: 3,
-                  backgroundColor: '#f8f9fa',
+          {/* Input area - Fixed at bottom */}
+          <Box
+            sx={{
+              p: 3,
+              borderTop: '1px solid #e0e0e0',
+              backgroundColor: '#ffffff',
+              boxShadow: '0 -1px 3px rgba(0, 0, 0, 0.1)',
+              flexShrink: 0,
+              position: 'sticky',
+              bottom: 0,
+              zIndex: 1000,
+            }}
+          >
+            <Box sx={{ display: 'flex', gap: 1, alignItems: 'flex-end' }}>
+              <TextField
+                ref={inputRef}
+                fullWidth
+                multiline
+                maxRows={4}
+                value={inputValue}
+                onChange={(e) => setInputValue(e.target.value)}
+                onKeyPress={handleKeyPress}
+                placeholder="Ask me anything about tractors..."
+                disabled={!isConnected || isLoading}
+                variant="outlined"
+                size="small"
+                sx={{
+                  '& .MuiOutlinedInput-root': {
+                    borderRadius: 3,
+                    backgroundColor: '#f8f9fa',
+                    '&:hover': {
+                      backgroundColor: '#ffffff',
+                    },
+                    '&.Mui-focused': {
+                      backgroundColor: '#ffffff',
+                    },
+                  },
+                  '& .MuiInputBase-input': {
+                    fontSize: '0.95rem',
+                  },
+                }}
+              />
+              <IconButton
+                onClick={handleSendMessage}
+                disabled={!inputValue.trim() || !isConnected || isLoading}
+                color="primary"
+                sx={{
+                  bgcolor: 'primary.main',
+                  color: 'white',
+                  borderRadius: 2,
+                  width: 48,
+                  height: 48,
                   '&:hover': {
-                    backgroundColor: '#ffffff',
+                    bgcolor: 'primary.dark',
+                    transform: 'scale(1.05)',
                   },
-                  '&.Mui-focused': {
-                    backgroundColor: '#ffffff',
+                  '&:disabled': {
+                    bgcolor: 'grey.300',
+                    color: 'grey.500',
+                    transform: 'none',
                   },
-                },
-                '& .MuiInputBase-input': {
-                  fontSize: '0.95rem',
-                },
-              }}
-            />
-            <IconButton
-              onClick={handleSendMessage}
-              disabled={!inputValue.trim() || !isConnected || isLoading}
-              color="primary"
-              sx={{
-                bgcolor: 'primary.main',
-                color: 'white',
-                borderRadius: 2,
-                width: 48,
-                height: 48,
-                '&:hover': {
-                  bgcolor: 'primary.dark',
-                  transform: 'scale(1.05)',
-                },
-                '&:disabled': {
-                  bgcolor: 'grey.300',
-                  color: 'grey.500',
-                  transform: 'none',
-                },
-                transition: 'all 0.2s ease-in-out',
-              }}
-            >
-              {isLoading ? (
-                <CircularProgress size={20} color="inherit" />
-              ) : (
-                <SendIcon />
-              )}
-            </IconButton>
+                  transition: 'all 0.2s ease-in-out',
+                }}
+              >
+                {isLoading ? (
+                  <CircularProgress size={20} color="inherit" />
+                ) : (
+                  <SendIcon />
+                )}
+              </IconButton>
+            </Box>
           </Box>
         </Box>
-      </Box>
       </Box>
     </Box>
   );

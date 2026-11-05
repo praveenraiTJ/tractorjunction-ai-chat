@@ -8,7 +8,7 @@ class OpenAIService {
     this.openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY
     });
-    this.model = process.env.OPENAI_MODEL || 'gpt-3.5-turbo';
+    this.model = process.env.OPENAI_MODEL || 'gpt-4o-mini';
   }
 
   // Helper function to check database connectivity
@@ -33,17 +33,16 @@ class OpenAIService {
   async getCachedResponse(query, context = '') {
     try {
       const queryHash = this.generateQueryHash(query, context);
-      
+
       // Check in-memory cache first
       const cachedResponse = getCache(`openai_${queryHash}`);
       if (cachedResponse) {
-        console.log('✅ Response found in memory cache');
         return cachedResponse;
       }
 
       // Check database connection before attempting database cache
       const dbConnected = await this.checkDatabaseConnection();
-      
+
       if (dbConnected) {
         // Check database cache
         const cacheResult = await dbConnection.query(
@@ -55,7 +54,6 @@ class OpenAIService {
           const responseData = cacheResult[0].response_data;
           // Store in memory cache for faster access
           setCache(`openai_${queryHash}`, responseData, 3600); // 1 hour
-          console.log('✅ Response found in database cache');
           return responseData;
         }
       } else {
@@ -77,7 +75,7 @@ class OpenAIService {
 
       // Check database connection before attempting database cache
       const dbConnected = await this.checkDatabaseConnection();
-      
+
       if (dbConnected) {
         // Store in database cache
         await dbConnection.query(
@@ -90,8 +88,7 @@ class OpenAIService {
 
       // Store in memory cache (always available)
       setCache(`openai_${queryHash}`, response, ttl);
-      
-      console.log('✅ Response cached successfully');
+
     } catch (error) {
       console.error('Error caching response:', error);
     }
@@ -101,7 +98,7 @@ class OpenAIService {
   detectLanguage(query) {
     const hindiRegex = /[\u0900-\u097F]/;
     const tamilRegex = /[\u0B80-\u0BFF]/;
-    
+
     if (hindiRegex.test(query)) return 'hi';
     if (tamilRegex.test(query)) return 'ta';
     return 'en';
@@ -150,7 +147,7 @@ Important links:
 - उत्पाद प्रश्नों के लिए, लिंक के साथ संरचित जानकारी प्रदान करें
 - सामान्य प्रश्नों के लिए, सहायक पाठ प्रतिक्रियाएं प्रदान करें
 - जब उपयुक्त हो तो ट्रैक्टर जंक्शन पृष्ठों के प्रासंगिक लिंक शामिल करें`,
-      
+
       ta: `நீங்கள் டிராக்டர் ஜங்க்ஷன் (https://www.tractorjunction.com/) க்கான AI உதவியாளர், இது இந்தியாவில் டிராக்டர் விற்பனை மற்றும் தகவல்களுக்கான முன்னணி தளமாகும்.
 
 உங்கள் பங்கு:
@@ -175,62 +172,46 @@ Important links:
   // Generate response using OpenAI
   async generateResponse(query, context = '', tractorsData = [], enhancedPrompt = null) {
     try {
-      console.log('='.repeat(80));
-      console.log('🔍 MULTI-TIER CACHE CHECK');
-      console.log('='.repeat(80));
-      console.log('   Query:', query);
-      console.log('   Enhanced Prompt:', enhancedPrompt ? 'Yes' : 'No');
-      console.log('   Tractors Data:', tractorsData.length, 'items');
-      
+      console.log(`🔍 OpenAI: Generating response for: "${query}" (${tractorsData.length} tractors in context)`);
+
       // Step 1: Check Memory Cache
-      console.log('─'.repeat(40));
-      console.log('📦 STEP 1: MEMORY CACHE CHECK');
-      console.log('─'.repeat(40));
-      if (!enhancedPrompt) {
-        const cachedResponse = await this.getCachedResponse(query, context);
-        if (cachedResponse) {
-          console.log('✅ MEMORY CACHE HIT: Using cached response');
-          console.log('   Cached response length:', cachedResponse.text?.length || 'N/A', 'characters');
-          return cachedResponse;
-        } else {
-          console.log('❌ MEMORY CACHE MISS: No cached response found');
-        }
-      } else {
-        const enhancedCacheKey = `enhanced_${query}_${tractorsData.length}`;
-        const cachedResponse = await this.getCachedResponse(enhancedCacheKey, context);
-        if (cachedResponse) {
-          console.log('✅ MEMORY CACHE HIT: Using cached enhanced response');
-          console.log('   Cached response length:', cachedResponse.text?.length || 'N/A', 'characters');
-          return cachedResponse;
-        } else {
-          console.log('❌ MEMORY CACHE MISS: No cached enhanced response found');
-        }
+      const cacheKey = enhancedPrompt ? `enhanced_${query}_${tractorsData.length}` : query;
+      const cachedResponse = await this.getCachedResponse(cacheKey, context);
+
+      if (cachedResponse) {
+        console.log(`✅ Cache Hit: Found cached response (${cachedResponse.text?.length || 0} chars)`);
+        return cachedResponse;
       }
 
       // Step 2: Check ChromaDB
-      console.log('─'.repeat(40));
-      console.log('🔍 STEP 2: CHROMADB VECTOR SEARCH');
-      console.log('─'.repeat(40));
       try {
         const { chromaService } = require('./chromaService');
-        const chromaResults = await chromaService.searchSimilar(query, 1);
-        if (chromaResults && chromaResults.length > 0) {
-          console.log('✅ CHROMADB HIT: Found similar response');
-          console.log('   ChromaDB response length:', chromaResults[0].text?.length || 'N/A', 'characters');
-          
+        const chromaResults = await chromaService.searchSimilar(query, 3);
+
+        // Filter to only get actual AI responses (not chat messages or sessions)
+        const validResponses = chromaResults.filter(result =>
+          result.response &&
+          result.response.length > 50 && // Must have substantial content
+          result.model &&
+          result.model.startsWith('gpt') // Only OpenAI generated responses
+        );
+
+        if (validResponses && validResponses.length > 0) {
+          console.log(`✅ ChromaDB Hit: Found similar response (${validResponses[0].response?.length || 0} chars)`);
+
           // Store in memory cache for faster future access
           const response = {
-            text: chromaResults[0].text,
-            language: chromaResults[0].language || 'en',
-            model: chromaResults[0].model || 'gpt-4o-mini',
-            usage: chromaResults[0].usage,
+            text: validResponses[0].response,
+            language: validResponses[0].language || 'en',
+            model: validResponses[0].model || 'gpt-4o-mini',
+            usage: validResponses[0].usage_tokens ? { total_tokens: validResponses[0].usage_tokens } : null,
             timestamp: new Date().toISOString(),
             tractors: tractorsData.length > 0 ? tractorsData : [],
             hasTractors: tractorsData.length > 0,
             searchIntent: enhancedPrompt ? 'tractor_search' : 'general',
             source: 'chromadb'
           };
-          
+
           // Cache the ChromaDB result
           if (!enhancedPrompt) {
             await this.cacheResponse(query, context, response, 3600);
@@ -238,24 +219,17 @@ Important links:
             const enhancedCacheKey = `enhanced_${query}_${tractorsData.length}`;
             await this.cacheResponse(enhancedCacheKey, context, response, 1800);
           }
-          
+
           return response;
         } else {
-          console.log('❌ CHROMADB MISS: No similar response found');
+          console.log('❌ CHROMADB MISS: No similar AI-generated response found');
         }
       } catch (error) {
         console.log('⚠️ CHROMADB ERROR:', error.message);
       }
 
-      // Step 3: Skip database check (not using remote DB for storage)
-      console.log('─'.repeat(40));
-      console.log('🗄️ STEP 3: DATABASE CHECK (SKIPPED)');
-      console.log('─'.repeat(40));
-      console.log('   Skipping database check (remote DB not used for storage)');
 
-      console.log('─'.repeat(40));
-      console.log('🤖 STEP 4: OPENAI GENERATION');
-      console.log('─'.repeat(40));
+      // Step 4: OpenAI Generation
       const language = this.detectLanguage(query);
       let systemPrompt;
       let userMessage;
@@ -270,12 +244,7 @@ Important links:
         userMessage = query;
       }
 
-      console.log(`🤖 Generating response for query: "${query}" in language: ${language}`);
-      console.log('📤 OpenAI API Call:');
-      console.log('   Model:', this.model);
-      console.log('   System Prompt Length:', systemPrompt.length, 'characters');
-      console.log('   User Message Length:', userMessage.length, 'characters');
-      console.log('   Enhanced Prompt:', enhancedPrompt ? 'Yes' : 'No');
+      console.log(`🤖 OpenAI: Requesting completion (model: ${this.model}, lang: ${language})`);
 
       const completion = await this.openai.chat.completions.create({
         model: this.model,
@@ -295,9 +264,7 @@ Important links:
         frequency_penalty: 0.1
       });
 
-      console.log('📥 OpenAI API Response:');
-      console.log('   Tokens Used:', completion.usage?.total_tokens || 'N/A');
-      console.log('   Response Length:', completion.choices[0].message.content.length, 'characters');
+      console.log(`📥 OpenAI: Received response (${completion.usage?.total_tokens || 0} tokens, ${completion.choices[0].message.content.length} chars)`);
 
       const response = {
         text: completion.choices[0].message.content,
@@ -311,50 +278,22 @@ Important links:
       };
 
       // Step 5: Store response in multiple systems
-      console.log('─'.repeat(40));
-      console.log('💾 STEP 5: MULTI-SYSTEM STORAGE');
-      console.log('─'.repeat(40));
-      
+      // Step 5: Storage
+
       // Store in Memory Cache
       if (!enhancedPrompt) {
-        console.log('   Storing in memory cache...');
-        await this.cacheResponse(query, context, response, 3600); // 1 hour cache
-        console.log('✅ Memory cache stored successfully');
+        await this.cacheResponse(query, context, response, 3600);
       } else {
-        console.log('   Storing enhanced response in memory cache...');
         const enhancedCacheKey = `enhanced_${query}_${tractorsData.length}`;
-        await this.cacheResponse(enhancedCacheKey, context, response, 1800); // 30 minutes cache for enhanced
-        console.log('✅ Enhanced memory cache stored successfully');
+        await this.cacheResponse(enhancedCacheKey, context, response, 1800);
       }
-
-      // Store in ChromaDB
-      try {
-        console.log('   Storing in ChromaDB...');
-        const { chromaService } = require('./chromaService');
-        await chromaService.addDocument({
-          text: response.text,
-          query: query,
-          context: context,
-          language: response.language,
-          model: response.model,
-          usage: response.usage,
-          timestamp: response.timestamp,
-          tractors: response.tractors,
-          hasTractors: response.hasTractors,
-          searchIntent: response.searchIntent
-        });
-        console.log('✅ ChromaDB stored successfully');
-      } catch (error) {
-        console.log('⚠️ ChromaDB storage error:', error.message);
-      }
-
-      // Skip database storage (not using remote DB for storage)
-      console.log('   Skipping database storage (remote DB not used for storage)');
+      console.log('✅ Storage: Memory cache updated');
+      // LLM responses are not written to ChromaDB: that collection holds product knowledge only.
 
       return response;
     } catch (error) {
       console.error('OpenAI API error:', error);
-      
+
       // Fallback response
       const language = this.detectLanguage(query);
       const fallbackResponses = {

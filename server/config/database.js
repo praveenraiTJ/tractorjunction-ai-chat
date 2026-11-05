@@ -18,10 +18,7 @@ class DatabaseConnection {
         waitForConnections: true,
         connectionLimit: 10,
         queueLimit: 0,
-        acquireTimeout: 60000,
-        connectTimeout: 10000,
-        timeout: 10000,
-        reconnect: true
+        connectTimeout: 10000
       });
 
       const connection = await this.pool.getConnection();
@@ -162,7 +159,6 @@ class DatabaseConnection {
           INDEX idx_mini (mini),
           INDEX idx_ac_cabin (ac_cabin),
           INDEX idx_2wd (2wd),
-          INDEX idx_4wd (4wd),
           INDEX idx_latest (latest)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
       `;
@@ -239,6 +235,10 @@ class DatabaseConnection {
 
   async query(sql, params = []) {
     try {
+      if (!this.pool) {
+        console.error('Database query error: Database not initialized. Call initialize() first.');
+        throw new Error('Database not initialized. Please ensure database connection is established before querying.');
+      }
       const [rows] = await this.pool.execute(sql, params);
       return rows;
     } catch (error) {
@@ -248,6 +248,9 @@ class DatabaseConnection {
   }
 
   async getConnection() {
+    if (!this.pool) {
+      throw new Error('Database not initialized. Please ensure database connection is established before getting a connection.');
+    }
     return await this.pool.getConnection();
   }
 

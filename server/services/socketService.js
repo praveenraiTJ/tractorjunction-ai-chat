@@ -1,9 +1,24 @@
 const { v4: uuidv4 } = require('uuid');
 const dbConnection = require('../config/database');
-const openaiService = require('./openaiService');
 const chromaService = require('./chromaService').chromaService;
-const { getSessionData, setSessionData, clearSessionData } = require('./cacheService');
-const intentAnalysisService = require('./intentAnalysisService');
+const { setSessionData } = require('./cacheService');
+const { runChatTurn } = require('./agent/orchestrator');
+
+const HISTORY_MESSAGES = 10;
+
+// Old UI (TractorCard) shape, kept until the widget UI renders `blocks`
+function legacyTractors(blocks) {
+  const block = blocks.find(b => b.type === 'tractors');
+  return (block?.data || []).map(t => ({
+    id: t.id,
+    model_name: t.model,
+    brand_name: t.brand,
+    price: t.price_lakh,
+    hp: t.hp,
+    images: t.image,
+    url: t.url
+  }));
+}
 
 class SocketService {
   constructor() {
@@ -18,111 +33,6 @@ class SocketService {
       return true;
     } catch (error) {
       return false;
-    }
-  }
-
-  // Helper function to store session in ChromaDB
-  async storeSessionInChromaDB(sessionId, userId, language) {
-    try {
-      if (!chromaService.client) {
-        console.log('⚠️ ChromaDB not available, skipping session storage');
-        return;
-      }
-
-      const sessionData = {
-        sessionId,
-        userId: userId || 'anonymous',
-        language,
-        createdAt: new Date().toISOString(),
-        type: 'session'
-      };
-
-      // Store session in ChromaDB
-      await chromaService.client.getOrCreateCollection({
-        name: 'chat_sessions'
-      });
-
-      await chromaService.client.add({
-        collection: 'chat_sessions',
-        documents: [JSON.stringify(sessionData)],
-        ids: [sessionId],
-        metadatas: [{
-          type: 'session',
-          userId: userId || 'anonymous',
-          language,
-          createdAt: new Date().toISOString()
-        }]
-      });
-
-      console.log(`✅ Session stored in ChromaDB: ${sessionId}`);
-    } catch (error) {
-      console.error('ChromaDB session storage error:', error);
-    }
-  }
-
-  // Helper function to store message in ChromaDB
-  async storeMessageInChromaDB(sessionId, messageType, content, metadata = {}) {
-    try {
-      if (!chromaService.client) {
-        console.log('⚠️ ChromaDB not available, skipping message storage');
-        return;
-      }
-
-      const messageData = {
-        sessionId,
-        messageType,
-        content,
-        metadata,
-        timestamp: new Date().toISOString(),
-        type: 'message'
-      };
-
-      // Store message in ChromaDB
-      await chromaService.client.getOrCreateCollection({
-        name: 'chat_messages'
-      });
-
-      const messageId = `${sessionId}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-
-      await chromaService.client.add({
-        collection: 'chat_messages',
-        documents: [JSON.stringify(messageData)],
-        ids: [messageId],
-        metadatas: [{
-          type: 'message',
-          sessionId,
-          messageType,
-          timestamp: new Date().toISOString()
-        }]
-      });
-
-      console.log(`✅ Message stored in ChromaDB: ${messageId}`);
-    } catch (error) {
-      console.error('ChromaDB message storage error:', error);
-    }
-  }
-
-  // Helper function to update session in ChromaDB
-  async updateSessionInChromaDB(sessionId, updateData) {
-    try {
-      if (!chromaService.client) {
-        console.log('⚠️ ChromaDB not available, skipping session update');
-        return;
-      }
-
-      // Update session metadata in ChromaDB
-      await chromaService.client.update({
-        collection: 'chat_sessions',
-        id: sessionId,
-        metadatas: [{
-          ...updateData,
-          updatedAt: new Date().toISOString()
-        }]
-      });
-
-      console.log(`✅ Session updated in ChromaDB: ${sessionId}`);
-    } catch (error) {
-      console.error('ChromaDB session update error:', error);
     }
   }
 
@@ -142,12 +52,18 @@ class SocketService {
             sessionId,
             userId,
             language,
+            profile: data.profile || {},
+            pageContext: data.pageContext || null,
+            abortController: null,
             connectedAt: new Date(),
             lastActivity: new Date()
           });
 
-          // Store session in ChromaDB instead of remote database
-          await this.storeSessionInChromaDB(sessionId, userId, language);
+          try {
+            await this.createOrUpdateSession(sessionId, userId, language);
+          } catch (error) {
+            // Chat still works without persistence
+          }
 
           // Store in cache (always available)
           setSessionData(sessionId, 'socketId', socket.id);
@@ -158,7 +74,7 @@ class SocketService {
             sessionId,
             language,
             status: 'success',
-            storageType: 'chromadb'
+            storageType: 'mysql'
           });
 
           console.log(`✅ Session initialized: ${sessionId}`);
@@ -180,32 +96,60 @@ class SocketService {
             return;
           }
 
-          const { message, messageId } = data;
+          const { message } = data;
+          if (!message || !String(message).trim()) return;
           const sessionId = session.sessionId;
+          const botMessageId = uuidv4();
 
           // Update last activity
           session.lastActivity = new Date();
 
-          // Store user message in ChromaDB
-          await this.storeMessageInChromaDB(sessionId, 'user', message, { messageId });
+          // A new question cancels any answer still streaming
+          session.abortController?.abort();
+          const abortController = new AbortController();
+          session.abortController = abortController;
 
-          // Emit typing indicator
           socket.emit('bot_typing', { isTyping: true });
 
-          // Process message and generate response
-          const response = await this.processMessage(message, session);
+          const history = await this.getSessionContext(sessionId);
+          this.storeMessage(sessionId, 'user', message, { messageId: data.messageId }).catch(() => {});
 
-          // Store bot response in ChromaDB
-          await this.storeMessageInChromaDB(sessionId, 'bot', response.text, {
-            messageId: uuidv4(),
-            model: response.model || 'gpt-4o-mini',
-            usage: response.usage || null,
-            language: response.language || 'en'
-          });
+          const startedAt = Date.now();
+          let response;
+          try {
+            response = await runChatTurn({
+              message,
+              history,
+              profile: session.profile,
+              pageContext: session.pageContext,
+              signal: abortController.signal,
+              onDelta: (delta) => socket.emit('bot_stream', { messageId: botMessageId, delta }),
+              onBlock: (block) => socket.emit('bot_block', { messageId: botMessageId, block })
+            });
+          } catch (error) {
+            if (abortController.signal.aborted) {
+              socket.emit('bot_typing', { isTyping: false });
+              socket.emit('bot_stopped', { messageId: botMessageId });
+              return;
+            }
+            throw error;
+          } finally {
+            if (session.abortController === abortController) session.abortController = null;
+          }
 
-          // Emit response
+          this.storeMessage(sessionId, 'bot', response.text, {
+            messageId: botMessageId,
+            model: response.model,
+            usage: response.usage,
+            blocks: response.blocks,
+            suggestions: response.suggestions,
+            tools: response.toolsUsed
+          }).catch(() => {});
+          this.trackAnalytics(sessionId, message, response, Date.now() - startedAt);
+
+          const tractors = legacyTractors(response.blocks);
           socket.emit('bot_response', {
-            messageId: uuidv4(),
+            messageId: botMessageId,
             text: response.text,
             language: response.language,
             timestamp: new Date().toISOString(),
@@ -213,9 +157,11 @@ class SocketService {
               model: response.model,
               usage: response.usage
             },
-            tractors: response.tractors || [],
-            hasTractors: response.hasTractors || false,
-            searchIntent: response.searchIntent || 'general'
+            blocks: response.blocks,
+            suggestions: response.suggestions,
+            tractors,
+            hasTractors: tractors.length > 0,
+            searchIntent: response.toolsUsed.map(t => t.name).join(',') || 'general'
           });
 
           // Stop typing indicator
@@ -229,6 +175,22 @@ class SocketService {
             error: error.message
           });
         }
+      });
+
+      // "Stop generating" button
+      socket.on('stop_generation', () => {
+        this.activeSessions.get(socket.id)?.abortController?.abort();
+      });
+
+      // Location / page context from the widget (browser geolocation, parent TJ page)
+      socket.on('update_profile', (data = {}) => {
+        const session = this.activeSessions.get(socket.id);
+        if (!session) return;
+        const { state, district, latitude, longitude, pageContext } = data;
+        Object.assign(session.profile, Object.fromEntries(
+          Object.entries({ state, district, latitude, longitude }).filter(([, v]) => v != null)
+        ));
+        if (pageContext !== undefined) session.pageContext = pageContext;
       });
 
       // Handle typing indicators
@@ -287,7 +249,7 @@ class SocketService {
           }
 
           const { query, filters = {} } = data;
-          
+
           // Search using ChromaDB
           const results = await chromaService.searchSimilar(query, 10, filters);
 
@@ -324,16 +286,11 @@ class SocketService {
           const session = this.activeSessions.get(socket.id);
           if (session) {
             console.log(`🔌 User disconnected: ${socket.id}, Session: ${session.sessionId}`);
-            
+
             // Clean up session data
+            session.abortController?.abort();
             this.activeSessions.delete(socket.id);
             this.typingUsers.delete(socket.id);
-            
-            // Update session end time in ChromaDB
-            await this.updateSessionInChromaDB(session.sessionId, {
-              disconnectedAt: new Date().toISOString(),
-              status: 'disconnected'
-            });
           }
         } catch (error) {
           console.error('Disconnect cleanup error:', error);
@@ -358,7 +315,7 @@ class SocketService {
     try {
       // Check database connection first
       const dbConnected = await this.checkDatabaseConnection();
-      
+
       if (!dbConnected) {
         console.log('⚠️ Database not available, skipping session creation/update');
         return;
@@ -393,7 +350,7 @@ class SocketService {
     try {
       // Check database connection first
       const dbConnected = await this.checkDatabaseConnection();
-      
+
       if (!dbConnected) {
         console.log('⚠️ Database not available, skipping message storage');
         return;
@@ -409,85 +366,11 @@ class SocketService {
     }
   }
 
-  async processMessage(message, session) {
-    try {
-      // Get session context
-      const context = await this.getSessionContext(session.sessionId);
-      
-      // Analyze user intent
-      console.log('🔍 Analyzing user intent...');
-      const intentData = await intentAnalysisService.analyzeIntent(message);
-      console.log('📊 Intent analysis result:', intentData);
-      
-      let tractorsData = [];
-      let enhancedPrompt = null;
-      
-      // If tractor-related query, search database
-      if (intentData.isTractorRelated && intentData.confidence > 0.3) {
-        console.log('🚜 Tractor-related query detected, searching database...');
-        
-        // Generate SQL query based on intent
-        const sqlQuery = intentAnalysisService.generateSQLQuery(intentData);
-        
-        if (sqlQuery) {
-          try {
-            console.log('🔍 SQL Query Generated:');
-            console.log('   SQL:', sqlQuery.sql);
-            console.log('   Params:', sqlQuery.params);
-            
-            // Execute database search
-            tractorsData = await dbConnection.query(sqlQuery.sql, sqlQuery.params);
-            console.log(`✅ Found ${tractorsData.length} tractors in database`);
-            
-            // Log sample data if found
-            if (tractorsData.length > 0) {
-              console.log('📊 Sample tractor data:');
-              tractorsData.slice(0, 2).forEach((tractor, index) => {
-                console.log(`   ${index + 1}. ${tractor.brand_name} ${tractor.model_name} - ₹${tractor.price}`);
-              });
-            }
-            
-            // Create enhanced prompt with tractor data
-            if (tractorsData.length > 0) {
-              enhancedPrompt = intentAnalysisService.createEnhancedPrompt(message, intentData, tractorsData);
-              console.log('📝 Enhanced Prompt Created:');
-              console.log('   Length:', enhancedPrompt.length, 'characters');
-              console.log('   Preview:', enhancedPrompt.substring(0, 200) + '...');
-            }
-          } catch (dbError) {
-            console.error('❌ Database search error:', dbError);
-            // Fallback to ChromaDB search
-            tractorsData = await chromaService.searchSimilar(message, 5);
-          }
-        }
-      } else {
-        // For non-tractor queries, use ChromaDB search
-        tractorsData = await chromaService.searchSimilar(message, 5);
-      }
-      
-      // Generate response using OpenAI
-      const response = await openaiService.generateResponse(
-        message,
-        context,
-        tractorsData,
-        enhancedPrompt
-      );
-
-      // Track analytics
-      await this.trackAnalytics(session.sessionId, message, response);
-
-      return response;
-    } catch (error) {
-      console.error('Message processing error:', error);
-      throw error;
-    }
-  }
-
   async getSessionContext(sessionId) {
     try {
-      // Get recent messages for context
+      // Recent turns for multi-turn memory (oldest first)
       const recentMessages = await dbConnection.query(
-        'SELECT message_type, content FROM chat_messages WHERE session_id = ? ORDER BY created_at DESC LIMIT 5',
+        `SELECT message_type, content FROM chat_messages WHERE session_id = ? ORDER BY created_at DESC, id DESC LIMIT ${HISTORY_MESSAGES}`,
         [sessionId]
       );
 
@@ -501,30 +384,20 @@ class SocketService {
     }
   }
 
-  async trackAnalytics(sessionId, query, response) {
+  async trackAnalytics(sessionId, query, response, responseTimeMs) {
     try {
-      // Check database connection first
-      const dbConnected = await this.checkDatabaseConnection();
-      
-      if (!dbConnected) {
-        console.log('⚠️ Database not available, skipping analytics tracking');
-        return;
-      }
-
-      const intent = await openaiService.extractIntent(query);
-      
       await dbConnection.query(
         'INSERT INTO chat_analytics (session_id, query_text, intent, response_type, response_time_ms) VALUES (?, ?, ?, ?, ?)',
         [
           sessionId,
           query,
-          intent,
-          response.error ? 'error' : 'success',
-          response.usage?.total_tokens || 0
+          response.toolsUsed.map(t => t.name).join(',').slice(0, 100) || 'general',
+          'success',
+          responseTimeMs
         ]
       );
     } catch (error) {
-      console.error('Analytics tracking error:', error);
+      console.error('Analytics tracking error:', error.message);
     }
   }
 
@@ -532,7 +405,7 @@ class SocketService {
     try {
       // Check database connection first
       const dbConnected = await this.checkDatabaseConnection();
-      
+
       if (!dbConnected) {
         console.log('⚠️ Database not available, skipping interaction tracking');
         return;
